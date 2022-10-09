@@ -1,0 +1,296 @@
+---
+title: "Exploratory Data Analyses - Predicting Alzheimer"
+author: "Group 18: Alzheimeow (Joanna Shen, Ziqian Liao)"
+date: "2022-10-08"
+output: pdf_document
+---
+# 1. General area/domain/subject area
+
+We are going to focus on the prediction of dementia/Alzheimer's disease.
+
+# 2.  Dataset and source 
+The data is fetched from the Open Access Series of Imaging Studies (OASIS), a project aimed at making MRI data sets of the brain freely available to the scientific community. A cross-sectional dataset (https://github.com/JiaaiShen/BST210_Project/blob/main/oasis_cross-sectional.csv) and a longitudinal dataset (https://github.com/JiaaiShen/BST210_Project/blob/main/oasis_longitudinal.csv) with personal features and MRI features of the group at risk are included. For this project, we will mainly use the cross-sectional dataset, but we are considering using the longitudinal dataset for further survival analysis.
+
+The cross-sectional dataset has the following columns for covariates:
+
+* M/F: sex (M for male and F for female)
+* Hand: dominant hand (R for right-handedness and L for left-handedness)
+* Age: age in years
+* Educ: education level (classified into values from 1 to 5 where 1 for lowest level of education and 5 for highest level of education)
+* SES: socioeconomic status (classified into values from 1 to 5 where 1 for highest status and 5 for lowest status)
+* MMSE: Mini-Mental State Examination score (30 possible points where 0-9 points for severe cognitive impairment, 10-18 points for moderate cognitive impairment, 19-23 points for mild cognitive impairment, and 24-30 for normal cognition) 
+* eTIV: estimated total intracranial volume which is an automated estimate of total intracranial volume in native space derived from the ASF
+* nwBV: normalized whole-brain volume which ranges from 0 to 1 and is defined as the percentage of the brain mask (non-black background) occupied by voxels classified as gray and white matter
+* ASF: Atlas Scaling Factor which is a computed scaling factor that transforms native-space brain and skull to the atlas target (i.e. the determinant of the transform matrix)
+
+Except that the last four covariates are continuous, the others are all categorical.
+
+For outcome, the column is CDR, which stands for Clinical Dementia Rating, a scale for staging patients with dementia. It ranges from 0 to 3 where 0 for no dementia, 0.5 for questionable dementia, 1 for mild cognitive impairment, 2 for moderate cognitive impairment, and 3 for severe cognitive impairment.
+
+# 3.  Primary questions
+
+What clinical and personal features increase the risk of dementia and the onset of Alzheimer’s disease, and how do these features contribute to that?
+
+# 4.  Secondary questions
+
+We are going to study the following secondary questions:
+
+* How clinical features like Mini-Mental State Examination (MMSE) score, estimated total intracranial volume, normalized whole-brain volume, or Atlas Scaling Factor (ASF) can affect an individual’s demented status? Among these features, which are more statistically significant? 
+
+* How personal features like age, gender, socioeconomic status, dominant hand, or education level can affect an individual’s demented status? Among these features, which are more statistically significant?
+
+* Will there be confounders among those features? Are the above effects confounded by other variables? Is there any effect modification?
+
+# 5.  Outcome(s)/endpoint(s) 
+
+We are considering using the Clinical Dementia Rating (CDR), a scale for staging patients with dementia, as the primary outcome variable for this study. This is an ordinal categorical variable. The CDR is based on a scale of 0 to 3: no dementia (CDR = 0), questionable dementia (CDR = 0.5), mild cognitive impairment (CDR = 1), moderate cognitive impairment (CDR = 2), and severe cognitive impairment (CDR = 3).
+
+# 6.  Draft Statistical Analysis Plan
+
+* Exploratory data analysis (EDA)
+  + Inspect distributions of potential predictors by creating histograms, box plots, and summary statistics
+  + Inspect potential associations between predictors by creating scatter plots and box plots
+
+* Data cleaning and preprocessing
+  + Handle missing data by omitting problematic observations or imputing random values
+  + Identify and remove abnormal values
+  + Remove columns that we will not use
+  + Transform and encode certain columns
+  
+* Model exploration and comparison
+  + Build a baseline model based on the results from EDA
+    + Create plots to check model assumptions and identify outliers, points high leverage, and influential points
+  + Investigate potential confounders and effect modifiers
+    + Use the classical definition of a confounder (based on subject matter knowledge) and the operational/statistical definition of a confounder (via the 10% rule to check whether there will be appreciable difference between the crude analysis and the adjusted analysis) to identify confounders
+    + Include interaction term and look at p-values to identify effect modifiers
+
+  + Compare different regression approaches
+    + Build models for ordinal categorical regression (a) based on the assumption of equal leaps for each beta and (b) without the equal leap assumption and use certain criteria (such as AIC, BIC, and Elastic Net) to decide which variables we should include in our model
+      + Check model assumptions accordingly and identify outliers, points of high leverage, and influential points for each model
+      + Compare model performance by performing F-test (for nested models) and looking at adjusted R-squared or other criteria
+  + Select the most performant model as our final model
+  
+* Survival analysis using the longitudinal dataset (tentative)
+  + …
+  
+# 7.  Biggest challenges foreseen 
+The biggest challenges we foresee in answering our proposed questions and completing this project are:
+
+* There are multiple missing data both in the outcome and in the covariates. We foresee challenges in finding appropriate approaches to handle missing data to ensure model accuracy and robustness.
+
+* The number of outcome variables in different categories are imbalanced. More specifically, there are few samples demonstrating moderate to severe dementia while there is much more data on the opposite side. We foresee challenges in finding appropriate ways to diversify our data so that we can build a more accurate model.
+
+# 8.  Domain expertise sought 
+
+Yes, we will. We are planning to seek domain expertise when we have issues with understanding certain predictors or interpreting the results. We are considering peers and scholars with training or backgrounds in diagnosing and treating Alzheimer’s disease as potential expertise that we can reach out to. We have already found several such resources as the Mair Lab at HSPH. One of their research is about Alzheimer’s disease.
+
+# 9. software package(s)
+	We are planning to use R as the primary language of programming, with packages such as:
+	
+* `ggplot2` for data visualization 
+* `tidyverse` for data manipulation 
+* `caret` for validation methods 
+* `gam` for general additive model 
+* `splines` and `splines2` for spline
+* …
+
+# 10. exploratory analyses
+
+```{r global.options, include = TRUE}
+knitr::opts_chunk$set(
+    fig.align = 'center')
+```
+
+```{r}
+crs_df <- read.csv("oasis_cross-sectional.csv")
+long_df <- read.csv("oasis_longitudinal.csv")
+```
+
+```{r}
+library(ggplot2)
+```
+
+## (1) Inspecting data
+
+```{r}
+summary(crs_df)
+```
+
+## (2) Missing Value inspection
+
+```{r}
+colSums(is.na(crs_df))
+```
+
+For the variables `Educ`, `SES`, `MMSE`, and `CDR`, there are about 200 cases of missing values.
+
+```{r}
+table(crs_df$Delay)
+```
+
+The variable `Delay` is missing for most of the observations, and there is no clear definition of it from the source of data, so we will consider dropping this column. 
+
+## (3) Organizing Data 
+
+```{r}
+#gender should be a categorical variable
+crs_df$sex <- as.factor(crs_df$M.F) 
+table(crs_df$sex)
+
+#handedness should be a categorical variable 
+crs_df$hand <- as.factor(crs_df$Hand)
+table(crs_df$hand)
+
+#levels of education received should be a categorical variable (from 5(most education) to 1 (least education))
+crs_df$educ <- as.factor(crs_df$Educ)
+table(crs_df$educ)
+
+#socialeconomic status should be a categorical variable (from 1 (highest status) to 5 (lowest status))
+crs_df$ses <- as.factor(crs_df$SES)
+table(crs_df$ses)
+
+#Clinical Dementia Rating should be a categorical variable (0 = no dementia, 0.5 = very mild AD, 1 = mild AD, 2 = moderate AD)
+crs_df$cdr <- as.factor(crs_df$CDR)
+table(crs_df$cdr)
+
+```
+Based on the result, we should consider omitting the variable `hand` since the study includes only right-handed participants. There will be no contribution by the variable to prediction. 
+
+Similarly, we should consider omitting the variable `ID` since it contains information regarding each case's identification number and will not contribute to the outcome of interest.
+
+```{r}
+#remove original columns without modification
+crs_df <- subset(crs_df, select = -c(M.F, Hand, Educ, SES, CDR))
+
+#remove handedness
+crs_df <- subset(crs_df, select = -c(hand))
+
+#remove ID
+crs_df <- subset(crs_df, select = -c(ID))
+
+#remove Delay
+crs_df <- subset(crs_df, select = -c(Delay))
+```
+
+
+These are all variables that will be considered for the model, with `cdr` (Clinical Dementia Rating) being the outcome of interest.
+
+```{r}
+summary(crs_df)
+```
+
+## (4) Ploting Distributions of Single Variables
+
+##### CDR - Clinical Dementia Rating
+```{r}
+ggplot(crs_df[!is.na(crs_df$cdr),], aes(cdr)) + 
+  geom_bar(color = 'white', fill = 'brown2') + 
+  labs(title = 'Distribution of Clinical Dementia Rating')
+```
+From the plot we found a right-skewed distribution of clinical dementia rating, indicating that most of the participants perform well (0 = no dementia) in the test. 
+
+##### Age - Age
+```{r}
+ggplot(crs_df, aes(Age)) + 
+  geom_histogram(binwidth = 5, color = 'white', fill = 'orange') + 
+  labs(title = 'Distribution of Age')
+```
+From the plot we found a bimodal distribution of age: a large proportion of our samples are under 25, and there is another cluster around 75.  
+
+##### sex - Sex
+```{r}
+ggplot(crs_df, aes(sex)) + geom_bar(color = 'white', fill = 'cyan4') + labs(title = 'Distribution of sex')
+```
+From the plot we found that the proportion of females is relatively large compared with males in this dataset. 
+
+##### educ - Education Level
+```{r}
+ggplot(crs_df[!is.na(crs_df$educ),], aes(educ)) + 
+  geom_bar(color = 'white', fill = 'orange') + 
+  labs(title = 'Distribution of Education Level')
+```
+From the plot we found that most of the participants are on level 2 in education received, and that least are on level 1. 
+
+##### MMSE - Mini-Mental State Examination Score
+```{r}
+ggplot(crs_df[!is.na(crs_df$MMSE),], aes(MMSE)) + 
+  geom_bar(color = 'white', fill = 'darkgreen') + 
+  labs(title = 'Distribution of Mini-Mental State Examination Score')
+```
+From the plot we found that the distribution of Mini-Mental State Examination score is left-skewed, indicating that most of the participants are performing well in the test. 
+
+##### eTIV - Estimated Total Intracranial Volume
+```{r}
+ggplot(crs_df, aes(eTIV)) + 
+  geom_histogram(bins = 20, color = 'white', fill = 'lightblue') + 
+  labs(title = 'Distribution of Estimated Total Intracranial Volume')
+```
+
+From the plot we found that the distribution of estimated total intracranial volume is approximately symmetric with a center at around 1470. 
+
+##### nWBV - Normalized Whole-brain Volume
+```{r}
+ggplot(crs_df, aes(nWBV)) + 
+  geom_histogram(bins = 20, color = 'white', fill = 'cornsilk3') + 
+  labs(title = 'Distribution of Normalized Whole-brain Volume')
+```
+
+From the plot we found that the distribution of normalized whole-brain volume is left skewed and has a peak at around 0.83.
+
+##### ASF - Atlas Scaling Factor
+```{r}
+ggplot(crs_df, aes(ASF)) + geom_histogram(bins = 20, color = 'white', fill = 'goldenrod') + labs(title = 'Distribution of Atlas Scaling Factor')
+```
+From the plot we found that the distribution of atlas scaling factor is approximately symmetric with a center at around 1.2.
+
+
+## (5) Exploring Relationships between Variables
+
+##### Age vs. Clinical Dementia Rating
+```{r}
+ggplot(crs_df[!is.na(crs_df$cdr),], aes(Age, cdr)) +
+  geom_boxplot(aes(fill = cdr)) + labs(title = 'Age vs. Clinical Dementia Rating')
+```
+From the plot we found that older people are more vulnerable to the risk of dementia. 
+
+##### Socioeconomic Status vs. Clinical Dementia Rating
+```{r}
+ggplot(crs_df[!is.na(crs_df$ses),], aes(ses, ..count..)) +
+  geom_bar(aes(fill = cdr), position = "dodge") + 
+  labs(title = 'Socioeconomic Status vs. Clinical Dementia Rating')
+```
+From the plot we observe that the group with higher social-economic status (smaller value for `ses`) appear to be less vulnerable to dementia compared with people with lower social-economic status (larger value for `ses`). 
+
+##### Education vs. Clinical Dementia Rating
+```{r}
+ggplot(crs_df[!is.na(crs_df$cdr),], aes(educ, ..count..)) +
+  geom_bar(aes(fill = cdr), position = "dodge") + 
+  labs(title = 'Education vs. Clinical Dementia Rating')
+```
+From the plot we observe that the group that have received more education (larger value for `educ`) appear to be less vulnerable to dementia compared with people that have received less education (smaller value for `educ`). 
+
+##### Estimated Total Intracranial Volume vs. Clinical Dementia Rating
+```{r}
+ggplot(crs_df[!is.na(crs_df$cdr),], aes(eTIV, cdr)) +
+  geom_boxplot(aes(fill = cdr)) + labs(title = 'Estimated Total Intracranial Volume vs. Clinical Dementia Rating')
+```
+From the plot we observe that the group with large estimated total intracranial volume may be more vulnerable to dementia. 
+
+##### Normalized Whole-Brain Volume vs. Clinical Dementia Rating
+```{r}
+ggplot(crs_df[!is.na(crs_df$cdr),], aes(nWBV, cdr)) +
+  geom_boxplot(aes(fill = cdr)) + labs(title = 'Normalized Whole-Brain Volume vs. Clinical Dementia Rating')
+```
+From the plot we observe that the group with large normalized whole-brain volume may be less vulnerable to dementia.
+
+##### Normalized Whole-Brain Volume vs. Estimated Total Intracranial Volume
+```{r}
+ggplot(crs_df, aes(nWBV,eTIV)) + 
+  geom_point(col = 'chocolate1') + 
+  labs(title = 'Normalized Whole-Brain Volume vs. Estimated Total Intracranial Volume') + 
+  geom_smooth(method = lm)
+```
+From the plot we observe no evidence of colinearity between `eTIV` and `nWBV`, suggesting that both may be included as predictors.
+
+# Project Attestation
+No member of this group is using these data or same/similar questions in any other course or course project, at HSPH. 
