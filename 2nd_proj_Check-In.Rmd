@@ -76,6 +76,14 @@ long_df_binary$Group <- relevel(long_df_binary$Group, ref = 'Nondemented')
 long_df_binary$M.F <- as.factor(long_df_binary$M.F)
 ```
 
+
+```{r}
+plot(long_df_binary$eTIV ~ long_df_binary$ASF)
+cor(long_df_binary$eTIV,long_df_binary$ASF)
+# we will only include one of the two given the strong linear correlation
+```
+
+
 # Modeling
 
 ## Linear
