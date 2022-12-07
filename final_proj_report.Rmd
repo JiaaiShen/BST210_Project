@@ -1,0 +1,278 @@
+---
+title: "BST210 Final Project Report Appendix"
+author: "Ziqian Liao, Joanna Shen"
+date: "2022-12-06"
+output: pdf_document
+---
+
+# Data Wrangling
+
+```{r}
+long_df <- read.csv("oasis_longitudinal.csv")
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(splines)
+library(splines2)
+library(haven)
+```
+
+```{r}
+table(long_df$Group, long_df$CDR)
+```
+
+```{r}
+#correct a few cases that might have incorrect data input of CDR 
+#(categorized as nondemented while cdr is not 0)
+long_df %>% filter(Group == 'Nondemented') %>% filter(CDR == 0.5)
+long_df_c <- long_df
+long_df_c[long_df_c$Group == 'Nondemented'& long_df_c$CDR == 0.5,]$CDR <- 0.0
+table(long_df_c$Group, long_df_c$CDR)
+```
+
+```{r}
+#create a binary outcome version of the longitudinal data by collapsing 
+#each individual's information into one observation (drop all but last visit)
+long_df_c_original <- long_df_c
+long_df_c[long_df_c$Group == 'Converted' & long_df_c_original$CDR == 0,]$Group <- 'Nondemented'
+long_df_c[long_df_c$Group == 'Converted' & long_df_c_original$CDR != 0,]$Group <- 'Demented'
+long_df_binary <- long_df_c %>% group_by(Subject.ID) %>% slice(n())
+```
+
+```{r}
+#to facilitate interpretation
+long_df_binary$EDUCcat <- case_when(
+  long_df_binary$EDUC <= 12 ~ 1, #less than or equal to high school level
+  long_df_binary$EDUC > 12 & long_df_binary$EDUC <= 16 ~ 2, #college level
+  long_df_binary$EDUC > 16 ~ 3, #above college
+)
+
+long_df_binary$nWBVperc <- long_df_binary$nWBV*100
+```
+
+```{r}
+# we will only include one of the two (eTIV) given the very strong linear correlation
+plot(long_df_binary$eTIV ~ long_df_binary$ASF)
+cor(long_df_binary$eTIV,long_df_binary$ASF)
+
+# we will only include one of the two (EDUC) given the strong linera correlation
+cor(long_df_binary$EDUCcat,long_df_binary$SES, use = "complete.obs")
+```
+
+```{r}
+#table of NA values
+colSums(is.na(long_df_binary))
+#percent of NA values
+round(colSums(is.na(long_df_binary))/nrow(long_df_binary),4)
+#dealing with NA - SES
+#SES has NAs > 5% but is strongly correlated with EDUCcat
+long_df_binary <- long_df_binary %>% select(-SES)
+#dealing with NA - MMSE
+#MMSE has NA < 5% 
+#only 1 NA, should be reasonable to fill the data with the individual's previous record
+tempid <- long_df_binary %>% filter(is.na(MMSE)) %>% pull(Subject.ID)
+long_df_c %>% filter(Subject.ID %in% tempid) %>% select(Subject.ID, Group, Visit, MMSE)
+long_df_binary[is.na(long_df_binary$MMSE),]$MMSE <- 26
+#NA table after cleaning
+colSums(is.na(long_df_binary))
+```
+
+```{r}
+#correct data types before model fitting 
+long_df_binary$Group <- as.factor(long_df_binary$Group)
+#use 'nondemented' as the reference group
+long_df_binary$Group <- relevel(long_df_binary$Group, ref = 'Nondemented')
+long_df_binary$M.F <- as.factor(long_df_binary$M.F)
+```
+
+# Exploratory Data Analysis (EDA)
+
+## Data visualization with each potential predictor individually)
+
+```{r}
+# categorical vs. categorical
+with(long_df_binary, table(M.F, Group))
+with(long_df_binary, table(EDUCcat, Group))
+
+# continuous vs. categorical
+ggplot(long_df_binary, aes(Age, Group)) +
+  geom_boxplot()
+ggplot(long_df_binary, aes(eTIV, Group)) +
+  geom_boxplot()
+ggplot(long_df_binary, aes(nWBV, Group)) +
+  geom_boxplot()
+```
+
+# Modeling
+
+## Linear (with model selection)
+
+```{r}
+#linear model
+lm_linear <- lm(nWBV~Age, data = long_df_binary)
+summary(lm_linear)
+#test model assumption
+plot(lm_linear)
+hist(lm_linear$residuals)
+#checking influential points
+cooksd<-cooks.distance(lm_linear)
+summary(cooksd)
+n<-length(cooksd)
+long_df_binary$cooksd <- cooksd
+long_df_binary[cooksd>4/(n-2),]
+```
+
+```{r}
+#quadratic model
+lm_quad <- lm(nWBV~Age + I(Age^2), data = long_df_binary)
+plot(lm_quad)
+hist(lm_quad$residuals)
+
+#cubic model
+lm_cub <- lm(nWBV~Age + I(Age^2) + I(Age^3), data = long_df_binary)
+
+#spline model with degree of freedom of 3
+lm_spline <- lm(nWBV~bSpline(Age, df = 3), data=long_df_binary)
+
+#model comparison with ANOVA
+anova(lm_linear, lm_quad)
+anova(lm_quad, lm_cub)
+
+#model comparison with AIC and adjusted R^2
+df_compare <- data.frame(cbind(c('linear','quadratic','cubic','spline'),c(AIC(lm_linear),AIC(lm_quad),AIC(lm_cub),AIC(lm_spline)),c(summary(lm_linear)$adj.r.squared,summary(lm_quad)$adj.r.squared,summary(lm_cub)$adj.r.squared,summary(lm_spline)$adj.r.squared)))
+colnames(df_compare) <- c('model','AIC','adjusted R^2')
+df_compare
+
+#quadratic is the most favored model
+summary(lm_quad)
+```
+## Logistic (with model selection)
+
+### Using a single predictor
+
+```{r}
+# estimated total intracranial volume
+logit_etiv <- glm(Group ~ eTIV, family=binomial(), data=long_df_binary)
+summary(logit_etiv)
+
+# normalized whole-brain volume
+logit_nwbv <- glm(Group ~ nWBVperc, family=binomial(), data=long_df_binary)
+summary(logit_nwbv)
+```
+
+### Using both of the potential predictors
+
+```{r}
+logit_both <- glm(Group ~ eTIV + nWBVperc, family=binomial(), data=long_df_binary)
+anova(logit_nwbv, logit_both, test="Chisq")
+```
+
+The ANOVA allows us to test the hypothesis $H_0$: the model using normalized whole-brain volume (the reduced model) is sufficient versus $H_1$: the model using both estimated total intracranial volume and normalized whole-brain volume (the full model) is preferred. The ANOVA table shows a p-value of 0.3226. Based on a significance level $\alpha = 0.05$, we fail to reject the null hypothesis. Thus, the reduced model is sufficient. Therefore, we think using normalized whole-brain volume alone better models the effect on dementia.
+
+### Comparing linear vs. quadratic vs. cubic
+
+```{r}
+# quadratic
+logit_nwbv_quad <- glm(Group ~ nWBVperc + I(nWBVperc^2), family = binomial(), data = long_df_binary)
+summary(logit_nwbv_quad)
+
+# cubic
+logit_nwbv_cub <- glm(Group ~ nWBVperc + I(nWBVperc^2) + I(nWBVperc^3), family = binomial(), data = long_df_binary)
+summary(logit_nwbv_cub)
+```
+
+Better fitting models have smaller AIC values. The AIC value of the model using linear normalized whole-brain volume is smaller than the AIC value of the model using quadratic normalized whole-brain volume, which is smaller than the AIC value of the model using cubic normalized whole-brain volume. We can reach the same conclusion that the model using linear normalized whole-brain volume is better by comparing the p-values, based on a significance level $\alpha = 0.05$.
+
+### Potential confounders
+
+#### Is sex a confounder?
+
+Sex is a risk factor for dementia and sex is associated with normalized whole-brain volume, but not a consequence of normalized whole-brain volume. The classic definition of confounding is that a variable C is a confounding factor of the association between X and Y, if C satisfies two conditions: (1) C is a risk factor of the outcome Y and (2) C is associated with exposure X, but not a consequence of exposure X. Thus, sex meets the classic definition of a confounder, and so we need to check whether sex meets the statistical (operational) definition of a confounder via the 10% rule.
+
+```{r}
+boxplot(nWBVperc~M.F,data=long_df_binary)
+```
+
+```{r}
+logit_nwbv_sex <- glm(Group~ nWBVperc + M.F, family=binomial(), data=long_df_binary)
+summary(logit_nwbv_sex)
+100*((coef(logit_nwbv)[2]-coef(logit_nwbv_sex)[2])/coef(logit_nwbv_sex)[2])
+```
+
+Including the potential confounder sex in the model with normalized whole-brain volume changes the parameter estimate for normalized whole-brain volume by more than 10%, so sex is a confounder of the effect of normalized whole-brain volume on dementia.
+
+#### Is age a confounder?
+
+Age is a risk factor for dementia and age is associated with normalized whole-brain volume, but not a consequence of normalized whole-brain volume. Thus, age meets the classic definition of a confounder, and so we need to check whether sex meets the statistical (operational) definition of a confounder via the 10% rule.
+
+```{r}
+logit_nwbv_age <- glm(Group~ nWBVperc + Age, family=binomial(), data=long_df_binary)
+summary(logit_nwbv_age)
+100*((coef(logit_nwbv)[2]-coef(logit_nwbv_age)[2])/coef(logit_nwbv_age)[2])
+```
+
+Including the potential confounder age in the model with normalized whole-brain volume changes the parameter estimate for normalized whole-brain volume by more than 10%, so age is a confounder of the effect of normalized whole-brain volume on dementia.
+
+### Is education level a confounder?
+
+```{r}
+boxplot(nWBVperc~EDUCcat,data=long_df_binary)
+```
+
+```{r}
+logit_nwbv_ed <- glm(Group~ nWBVperc + EDUCcat, family=binomial(), data=long_df_binary)
+summary(logit_nwbv_ed)
+100*((coef(logit_nwbv)[2]-coef(logit_nwbv_ed)[2])/coef(logit_nwbv_ed)[2])
+```
+
+Including the potential confounder education level in the model with normalized whole-brain volume changes the parameter estimate for normalized whole-brain volume by less than 10%, so education level is not a confounder of the effect of normalized whole-brain volume on dementia.
+
+```{r}
+logit_nwbv_sex_age <- glm(Group~ nWBVperc + M.F + Age, family=binomial(), data=long_df_binary)
+anova(logit_nwbv, logit_nwbv_sex_age, test="Chisq")
+```
+
+### Potential effect modifiers
+
+The p-values of the interaction terms are 0.55592 (for sex), 0.794 (for age), and 0.3542 (for education level), respectively. Based on a significance level $\alpha = 0.05$, we reject the null hypothesis in each case. Thus, none of sex, age, and education level is an effect modifier of the effect of normalized whole-brain volume on dementia.
+
+#### Is sex an effect modifier?
+
+```{r}
+logit_nwbv_nwbv.sex <- glm(Group~nWBVperc+M.F+nWBVperc*M.F, family=binomial(), data=long_df_binary)
+summary(logit_nwbv_nwbv.sex)
+```
+
+#### Is age an effect modifier?
+
+```{r}
+logit_nwbv_nwbv.age <- glm(Group~nWBVperc+Age+nWBVperc*Age, family=binomial(), data=long_df_binary)
+summary(logit_nwbv_nwbv.age)
+```
+
+#### Is education level an effect modifier?
+
+```{r}
+logit_nwbv_nwbv.ed <- glm(Group~nWBVperc+EDUCcat+nWBVperc*EDUCcat, family=binomial(), data=long_df_binary)
+summary(logit_nwbv_nwbv.ed)
+```
+
+#### Comparing linear vs. quadratic
+
+```{r}
+summary(logit_nwbv_sex_age)
+```
+
+```{r}
+logit_nwbv_quad_sex_age <- glm(Group~ nWBVperc + M.F + Age + I(nWBVperc^2), family=binomial(), data=long_df_binary)
+summary(logit_nwbv_quad_sex_age)
+```
+
+```{r}
+logit_nwbv_sex_age_quad <- glm(Group~ nWBVperc + M.F + Age + I(Age^2), family=binomial(), data=long_df_binary)
+summary(logit_nwbv_sex_age_quad)
+```
+
+### Poisson
