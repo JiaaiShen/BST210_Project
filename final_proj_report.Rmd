@@ -5,18 +5,20 @@ date: "2022-12-06"
 output: pdf_document
 ---
 
-# Data Wrangling
+# Data wrangling
 
 ```{r}
 long_df <- read.csv("oasis_longitudinal.csv")
 ```
 
 ```{r}
+# packages
 library(dplyr)
 library(ggplot2)
 library(splines)
 library(splines2)
 library(haven)
+library(survival)
 ```
 
 ```{r}
@@ -46,10 +48,8 @@ long_df_binary <- long_df_c %>% group_by(Subject.ID) %>% slice(n())
 long_df_binary$EDUCcat <- case_when(
   long_df_binary$EDUC <= 12 ~ 1, #less than or equal to high school level
   long_df_binary$EDUC > 12 & long_df_binary$EDUC <= 16 ~ 2, #college level
-  long_df_binary$EDUC > 16 ~ 3, #above college
+  TRUE ~ 3, #above college
 )
-
-long_df_binary$nWBVperc <- long_df_binary$nWBV*100
 ```
 
 ```{r}
@@ -81,10 +81,10 @@ colSums(is.na(long_df_binary))
 
 ```{r}
 #correct data types before model fitting 
-long_df_binary$Group <- as.factor(long_df_binary$Group)
+long_df_binary$Group <- factor(long_df_binary$Group)
 #use 'nondemented' as the reference group
 long_df_binary$Group <- relevel(long_df_binary$Group, ref = 'Nondemented')
-long_df_binary$M.F <- as.factor(long_df_binary$M.F)
+long_df_binary$M.F <- factor(long_df_binary$M.F)
 ```
 
 # Exploratory Data Analysis (EDA)
@@ -133,15 +133,12 @@ hist(lm_quad$residuals)
 #cubic model
 lm_cub <- lm(nWBV~Age + I(Age^2) + I(Age^3), data = long_df_binary)
 
-#spline model with degree of freedom of 3
-lm_spline <- lm(nWBV~bSpline(Age, df = 3), data=long_df_binary)
-
 #model comparison with ANOVA
 anova(lm_linear, lm_quad)
 anova(lm_quad, lm_cub)
 
 #model comparison with AIC and adjusted R^2
-df_compare <- data.frame(cbind(c('linear','quadratic','cubic','spline'),c(AIC(lm_linear),AIC(lm_quad),AIC(lm_cub),AIC(lm_spline)),c(summary(lm_linear)$adj.r.squared,summary(lm_quad)$adj.r.squared,summary(lm_cub)$adj.r.squared,summary(lm_spline)$adj.r.squared)))
+df_compare <- data.frame(cbind(c('linear','quadratic','cubic'),c(AIC(lm_linear),AIC(lm_quad),AIC(lm_cub)),c(summary(lm_linear)$adj.r.squared,summary(lm_quad)$adj.r.squared,summary(lm_cub)$adj.r.squared)))
 colnames(df_compare) <- c('model','AIC','adjusted R^2')
 df_compare
 
@@ -158,28 +155,61 @@ logit_etiv <- glm(Group ~ eTIV, family=binomial(), data=long_df_binary)
 summary(logit_etiv)
 
 # normalized whole-brain volume
-logit_nwbv <- glm(Group ~ nWBVperc, family=binomial(), data=long_df_binary)
+logit_nwbv <- glm(Group ~ nWBV, family=binomial(), data=long_df_binary)
 summary(logit_nwbv)
 ```
 
 ### Using both of the potential predictors
 
 ```{r}
-logit_both <- glm(Group ~ eTIV + nWBVperc, family=binomial(), data=long_df_binary)
+logit_both <- glm(Group ~ eTIV + nWBV, family=binomial(), data=long_df_binary)
 anova(logit_nwbv, logit_both, test="Chisq")
 ```
 
 The ANOVA allows us to test the hypothesis $H_0$: the model using normalized whole-brain volume (the reduced model) is sufficient versus $H_1$: the model using both estimated total intracranial volume and normalized whole-brain volume (the full model) is preferred. The ANOVA table shows a p-value of 0.3226. Based on a significance level $\alpha = 0.05$, we fail to reject the null hypothesis. Thus, the reduced model is sufficient. Therefore, we think using normalized whole-brain volume alone better models the effect on dementia.
 
+### Comparing continuous vs. ordinal vs. categorical
+
+```{r}
+long_df_binary <- long_df_binary %>% mutate(nWBVcat = case_when(
+  nWBV < 0.675 ~ 1,
+  nWBV >= 0.675 & nWBV < 0.7 ~ 2,
+  nWBV >= 0.7 & nWBV < 0.725 ~ 3,
+  nWBV >= 0.725 & nWBV < 0.75 ~ 4,
+  nWBV >= 0.75 & nWBV < 0.775 ~ 5,
+  TRUE ~ 6
+))
+```
+
+```{r}
+# ordinal
+logit_nwbv_ord <- glm(Group ~ nWBVcat, family=binomial(), data=long_df_binary)
+summary(logit_nwbv_ord)
+
+# categorical
+logit_nwbv_cat <- glm(Group ~ as.factor(nWBVcat), family=binomial(), data=long_df_binary)
+summary(logit_nwbv_cat)
+```
+
+```{r}
+plot(logit_nwbv$fitted.values~long_df_binary$nWBV,type='p',col='black',ylab="P(dementia)",xlab="Normalized whole-brain volume")
+lines(logit_nwbv_ord$fitted.values~long_df_binary$nWBV,type='p',col="red")
+legend('bottomright',legend=c("linear","ordinal"),pch=c(1,1),col=c(1,2))
+```
+
+```{r}
+anova(logit_nwbv_ord, logit_nwbv_cat, test="Chisq")
+```
+
 ### Comparing linear vs. quadratic vs. cubic
 
 ```{r}
 # quadratic
-logit_nwbv_quad <- glm(Group ~ nWBVperc + I(nWBVperc^2), family = binomial(), data = long_df_binary)
+logit_nwbv_quad <- glm(Group ~ nWBV + I(nWBV^2), family = binomial(), data = long_df_binary)
 summary(logit_nwbv_quad)
 
 # cubic
-logit_nwbv_cub <- glm(Group ~ nWBVperc + I(nWBVperc^2) + I(nWBVperc^3), family = binomial(), data = long_df_binary)
+logit_nwbv_cub <- glm(Group ~ nWBV + I(nWBV^2) + I(nWBV^3), family = binomial(), data = long_df_binary)
 summary(logit_nwbv_cub)
 ```
 
@@ -192,37 +222,37 @@ Better fitting models have smaller AIC values. The AIC value of the model using 
 Sex is a risk factor for dementia and sex is associated with normalized whole-brain volume, but not a consequence of normalized whole-brain volume. The classic definition of confounding is that a variable C is a confounding factor of the association between X and Y, if C satisfies two conditions: (1) C is a risk factor of the outcome Y and (2) C is associated with exposure X, but not a consequence of exposure X. Thus, sex meets the classic definition of a confounder, and so we need to check whether sex meets the statistical (operational) definition of a confounder via the 10% rule.
 
 ```{r}
-boxplot(nWBVperc~M.F,data=long_df_binary)
+boxplot(nWBV~M.F,data=long_df_binary)
 ```
 
 ```{r}
-logit_nwbv_sex <- glm(Group~ nWBVperc + M.F, family=binomial(), data=long_df_binary)
+logit_nwbv_sex <- glm(Group~ nWBV + M.F, family=binomial(), data=long_df_binary)
 summary(logit_nwbv_sex)
 100*((coef(logit_nwbv)[2]-coef(logit_nwbv_sex)[2])/coef(logit_nwbv_sex)[2])
 ```
 
 Including the potential confounder sex in the model with normalized whole-brain volume changes the parameter estimate for normalized whole-brain volume by more than 10%, so sex is a confounder of the effect of normalized whole-brain volume on dementia.
 
-#### Is age a confounder?
+#### Is square age a confounder?
 
-Age is a risk factor for dementia and age is associated with normalized whole-brain volume, but not a consequence of normalized whole-brain volume. Thus, age meets the classic definition of a confounder, and so we need to check whether sex meets the statistical (operational) definition of a confounder via the 10% rule.
+Square age is a risk factor for dementia and square age is associated with normalized whole-brain volume, but not a consequence of normalized whole-brain volume. Thus, square age meets the classic definition of a confounder, and so we need to check whether square age meets the statistical (operational) definition of a confounder via the 10% rule.
 
 ```{r}
-logit_nwbv_age <- glm(Group~ nWBVperc + Age, family=binomial(), data=long_df_binary)
+logit_nwbv_age <- glm(Group~ nWBV + I(Age^2), family=binomial(), data=long_df_binary)
 summary(logit_nwbv_age)
 100*((coef(logit_nwbv)[2]-coef(logit_nwbv_age)[2])/coef(logit_nwbv_age)[2])
 ```
 
-Including the potential confounder age in the model with normalized whole-brain volume changes the parameter estimate for normalized whole-brain volume by more than 10%, so age is a confounder of the effect of normalized whole-brain volume on dementia.
+Including the potential confounder square age in the model with normalized whole-brain volume changes the parameter estimate for normalized whole-brain volume by more than 10%, so square age is a confounder of the effect of normalized whole-brain volume on dementia.
 
 ### Is education level a confounder?
 
 ```{r}
-boxplot(nWBVperc~EDUCcat,data=long_df_binary)
+boxplot(nWBV~EDUCcat,data=long_df_binary)
 ```
 
 ```{r}
-logit_nwbv_ed <- glm(Group~ nWBVperc + EDUCcat, family=binomial(), data=long_df_binary)
+logit_nwbv_ed <- glm(Group~ nWBV + EDUCcat, family=binomial(), data=long_df_binary)
 summary(logit_nwbv_ed)
 100*((coef(logit_nwbv)[2]-coef(logit_nwbv_ed)[2])/coef(logit_nwbv_ed)[2])
 ```
@@ -230,7 +260,7 @@ summary(logit_nwbv_ed)
 Including the potential confounder education level in the model with normalized whole-brain volume changes the parameter estimate for normalized whole-brain volume by less than 10%, so education level is not a confounder of the effect of normalized whole-brain volume on dementia.
 
 ```{r}
-logit_nwbv_sex_age <- glm(Group~ nWBVperc + M.F + Age, family=binomial(), data=long_df_binary)
+logit_nwbv_sex_age <- glm(Group~ nWBV + M.F + I(Age^2), family=binomial(), data=long_df_binary)
 anova(logit_nwbv, logit_nwbv_sex_age, test="Chisq")
 ```
 
@@ -241,21 +271,21 @@ The p-values of the interaction terms are 0.55592 (for sex), 0.794 (for age), an
 #### Is sex an effect modifier?
 
 ```{r}
-logit_nwbv_nwbv.sex <- glm(Group~nWBVperc+M.F+nWBVperc*M.F, family=binomial(), data=long_df_binary)
+logit_nwbv_nwbv.sex <- glm(Group~nWBV+M.F+nWBV*M.F, family=binomial(), data=long_df_binary)
 summary(logit_nwbv_nwbv.sex)
 ```
 
 #### Is age an effect modifier?
 
 ```{r}
-logit_nwbv_nwbv.age <- glm(Group~nWBVperc+Age+nWBVperc*Age, family=binomial(), data=long_df_binary)
+logit_nwbv_nwbv.age <- glm(Group~nWBV+I(Age^2)+nWBV*I(Age^2), family=binomial(), data=long_df_binary)
 summary(logit_nwbv_nwbv.age)
 ```
 
 #### Is education level an effect modifier?
 
 ```{r}
-logit_nwbv_nwbv.ed <- glm(Group~nWBVperc+EDUCcat+nWBVperc*EDUCcat, family=binomial(), data=long_df_binary)
+logit_nwbv_nwbv.ed <- glm(Group~nWBV+EDUCcat+nWBV*EDUCcat, family=binomial(), data=long_df_binary)
 summary(logit_nwbv_nwbv.ed)
 ```
 
@@ -266,13 +296,132 @@ summary(logit_nwbv_sex_age)
 ```
 
 ```{r}
-logit_nwbv_quad_sex_age <- glm(Group~ nWBVperc + M.F + Age + I(nWBVperc^2), family=binomial(), data=long_df_binary)
+logit_nwbv_quad_sex_age <- glm(Group~ nWBV + M.F + I(Age^2) + I(nWBV^2), family=binomial(), data=long_df_binary)
 summary(logit_nwbv_quad_sex_age)
 ```
 
 ```{r}
-logit_nwbv_sex_age_quad <- glm(Group~ nWBVperc + M.F + Age + I(Age^2), family=binomial(), data=long_df_binary)
-summary(logit_nwbv_sex_age_quad)
+anova(logit_nwbv_sex_age, logit_nwbv_quad_sex_age, test="Chisq")
 ```
 
-### Poisson
+#### Interpretation
+
+```{r}
+plot(logit_nwbv_sex_age$fitted.values~long_df_binary$nWBV,
+     type='p',col='cyan4',
+     ylab="P(dementia)",xlab="Normalized whole-brain volume")
+```
+
+```{r}
+exp(coef(logit_nwbv_sex_age)[1])
+exp(coef(logit_nwbv_sex_age)[2])
+exp(coef(logit_nwbv_sex_age)[3])
+exp(coef(logit_nwbv_sex_age)[4])
+```
+
+### Survival Analysis
+
+#### Data wrangling
+
+```{r}
+long_df[long_df$Group == 'Nondemented' & long_df$CDR != 0,]$CDR <- 0
+
+filtered <- long_df %>% group_by(Subject.ID) %>% summarise(nvisit = n()) %>% filter(nvisit > 1) 
+
+list <- filtered$Subject.ID
+
+surv_info <- long_df %>% group_by(Subject.ID) %>% mutate(cdr_diff_max = max(CDR) - min(CDR)) %>% mutate(cdr_diff_lag =  CDR - lag(CDR)) %>% filter(Subject.ID %in% list) %>% select(Subject.ID, Visit, CDR, cdr_diff_max, cdr_diff_lag, Age) %>% mutate(cdr_change = as.numeric(cdr_diff_lag > 0)) 
+
+surv_df <- surv_info %>% summarize(result = max(cdr_change, na.rm = TRUE), years = ifelse(result == 0, max(Age) - min(Age), NA))
+
+surv_df$years[surv_df$Subject.ID == 'OAS2_0007'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0014'] <- 1
+surv_df$years[surv_df$Subject.ID == 'OAS2_0018'] <- 5
+surv_df$years[surv_df$Subject.ID == 'OAS2_0020'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0028'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0031'] <- 5
+surv_df$years[surv_df$Subject.ID == 'OAS2_0041'] <- 4
+surv_df$years[surv_df$Subject.ID == 'OAS2_0046'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0050'] <- 1
+surv_df$years[surv_df$Subject.ID == 'OAS2_0054'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0079'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0087'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0089'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0092'] <- 1
+surv_df$years[surv_df$Subject.ID == 'OAS2_0103'] <- 5
+surv_df$years[surv_df$Subject.ID == 'OAS2_0104'] <- 1
+surv_df$years[surv_df$Subject.ID == 'OAS2_0114'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0118'] <- 4
+surv_df$years[surv_df$Subject.ID == 'OAS2_0120'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0127'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0133'] <- 3
+surv_df$years[surv_df$Subject.ID == 'OAS2_0144'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0145'] <- 5
+surv_df$years[surv_df$Subject.ID == 'OAS2_0150'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0160'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0164'] <- 2
+surv_df$years[surv_df$Subject.ID == 'OAS2_0176'] <- 5
+surv_df$years[surv_df$Subject.ID == 'OAS2_0181'] <- 1
+surv_df$years[surv_df$Subject.ID == 'OAS2_0184'] <- 1
+
+temp <- long_df_binary %>% select(Subject.ID, nWBV)
+surv_df <- surv_df %>% left_join(temp, by = c('Subject.ID'))
+
+surv_df
+```
+
+```{r}
+summary(surv_df)
+```
+
+```{r}
+surv_df <- surv_df %>% mutate(nWBV_new = case_when(
+  nWBV < 0.7125 ~ 1,
+  TRUE ~ 2)
+)
+
+surv_df$nWBV_new = factor(surv_df$nWBV_new)
+```
+
+#### Kaplan-Meier survival estimate
+
+```{r}
+y <- Surv(surv_df$years, surv_df$result)
+
+# log-log CI
+ys_loglog <- survfit(y ~ 1, type="kaplan-meier", conf.type="log-log")
+summary(ys_loglog)
+
+# linear CI
+ys_linear <- survfit(y ~ 1, type="kaplan-meier", conf.type="plain")
+summary(ys_linear)
+```
+
+```{r}
+# Kaplan-Meier survival curve
+plot(ys_loglog, xlab="Years", ylab="Survival probability")
+```
+
+#### Cox
+
+##### Normalized whole-brain volume
+
+```{r}
+surv_nwbv <- coxph(y ~ nWBV_new, ties = "efron", data = surv_df)
+summary(surv_nwbv)
+```
+
+```{r}
+# log(-log(S)) vs. log(t)
+km_nwbv <- survfit(y ~ nWBV_new, data = surv_df)
+plot(km_nwbv, fun = "cloglog", xlab = "Log(Time in years)",
+     ylab = "Log-log survival", main = "Log-log curve by normalized whole-brain volume")
+```
+
+
+```{r}
+# weighted Schoenfeld residual
+resid.wt.scho <- cox.zph(surv_nwbv)
+resid.wt.scho
+plot(resid.wt.scho)
+```
